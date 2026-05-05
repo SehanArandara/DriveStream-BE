@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: drivestream-backend
-          image: YOUR_DOCKER_USERNAME/drivestream-server:latest
+          image: itnasun/drivestream-server:latest
           ports:
             - containerPort: 5000
           env:
