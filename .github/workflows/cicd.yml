@@ -2,7 +2,9 @@ name: 🚀 DriveStream CI/CD Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop, cicd-pipeline]
+  pull_request:
+    branches: [main, develop, cicd-pipeline]
 
 env:
   IMAGE_NAME: drivestream-server
