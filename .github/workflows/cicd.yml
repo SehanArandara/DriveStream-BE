@@ -37,7 +37,7 @@ jobs:
     name: 🔍 Lint and Test
     runs-on: ubuntu-latest
     needs: install
-    continue-on-error: true   
+    continue-on-error: true
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -61,7 +61,7 @@ jobs:
   # 3. BUILD APPLICATION
   # ─────────────────────────────
   build:
-    name : 🏗️ Build App
+    name: 🏗️ Build App
     runs-on: ubuntu-latest
     needs: lint-test
     steps:
@@ -145,19 +145,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: approval
 
-    env:
-      PORT: ${{ secrets.PORT }}
-      MONGODB_URI: ${{ secrets.MONGODB_URI }}
-      JWT_SECRET: ${{ secrets.JWT_SECRET }}
-      JWT_EXPIRES_IN: ${{ secrets.JWT_EXPIRES_IN }}
-      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
-      TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
-      TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
-      TWILIO_PHONE_NUMBER: ${{ secrets.TWILIO_PHONE_NUMBER }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      CLIENT_URL: ${{ secrets.CLIENT_URL }}
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -169,6 +156,65 @@ jobs:
 
       - name: Install Vercel CLI
         run: npm install -g vercel
+
+      # ─────────────────────────────────────────────────────
+      # SYNC GITHUB SECRETS → VERCEL via REST API
+      # Checks if each var exists → updates or creates it
+      # Runs on every deploy so Vercel stays in sync always
+      # ─────────────────────────────────────────────────────
+      - name: Sync Environment Variables to Vercel
+        run: |
+          BASE_URL="https://api.vercel.com/v10/projects/${{ secrets.VERCEL_PROJECT_ID }}/env"
+          TOKEN="${{ secrets.VERCEL_TOKEN }}"
+
+          sync_env() {
+            KEY="$1"
+            VALUE="$2"
+
+            # Fetch all env vars and check if this key already exists in production
+            EXISTING_ID=$(curl -s -X GET "$BASE_URL" \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Content-Type: application/json" | \
+              python3 -c "
+          import sys, json
+          try:
+            data = json.load(sys.stdin)
+            envs = data.get('envs', [])
+            match = next((e for e in envs if e['key'] == '$KEY' and 'production' in e.get('target', [])), None)
+            print(match['id'] if match else '')
+          except:
+            print('')
+          ")
+
+            # Safely JSON-encode the value to handle special characters
+            JSON_VALUE=$(echo "$VALUE" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read().strip()))")
+
+            if [ -n "$EXISTING_ID" ]; then
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "$BASE_URL/$EXISTING_ID" \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{\"value\": $JSON_VALUE, \"target\": [\"production\"], \"type\": \"encrypted\"}")
+              echo "✅ Updated  $KEY (HTTP $HTTP_STATUS)"
+            else
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL" \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{\"key\": \"$KEY\", \"value\": $JSON_VALUE, \"target\": [\"production\"], \"type\": \"encrypted\"}")
+              echo "✅ Created  $KEY (HTTP $HTTP_STATUS)"
+            fi
+          }
+
+          sync_env "PORT"                  "${{ secrets.PORT }}"
+          sync_env "MONGODB_URI"           "${{ secrets.MONGODB_URI }}"
+          sync_env "JWT_SECRET"            "${{ secrets.JWT_SECRET }}"
+          sync_env "JWT_EXPIRES_IN"        "${{ secrets.JWT_EXPIRES_IN }}"
+          sync_env "STRIPE_SECRET_KEY"     "${{ secrets.STRIPE_SECRET_KEY }}"
+          sync_env "STRIPE_WEBHOOK_SECRET" "${{ secrets.STRIPE_WEBHOOK_SECRET }}"
+          sync_env "TWILIO_ACCOUNT_SID"    "${{ secrets.TWILIO_ACCOUNT_SID }}"
+          sync_env "TWILIO_AUTH_TOKEN"     "${{ secrets.TWILIO_AUTH_TOKEN }}"
+          sync_env "TWILIO_PHONE_NUMBER"   "${{ secrets.TWILIO_PHONE_NUMBER }}"
+          sync_env "OPENAI_API_KEY"        "${{ secrets.OPENAI_API_KEY }}"
+          sync_env "CLIENT_URL"            "${{ secrets.CLIENT_URL }}"
 
       - name: Pull Vercel Environment Info
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
