@@ -7,7 +7,7 @@ on:
     branches: [main, develop, cicd-pipeline]
 
 env:
-  IMAGE_NAME: drivestream-server
+  IMAGE_NAME: drivestreamserver
 
 jobs:
 
@@ -157,9 +157,9 @@ jobs:
       - name: Install Vercel CLI
         run: npm install -g vercel
 
-      # # Pull project settings
-      # - name: Pull Vercel Environment Info
-      #   run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      # Pull project settings
+      - name: Pull Vercel Environment Info
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
       # Build project using Vercel
       - name: Build Project
