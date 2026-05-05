@@ -157,9 +157,9 @@ jobs:
       - name: Install Vercel CLI
         run: npm install -g vercel
 
-      # Pull project settings (now stable because of vercel.json)
+      # Pull project settings
       - name: Pull Vercel Environment Info
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }} --project drivestream-server
 
       # Build project using Vercel
       - name: Build Project
