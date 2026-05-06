@@ -7,7 +7,8 @@ const {
   updateVehicle, 
   deleteVehicle,
   searchVehicle,
-  getAllVehiclesAdmin
+  getAllVehiclesAdmin,
+  getVehicleHistory
 } = require('../controllers/vehicle.controller');
 const { protect, authorize } = require('../middleware/auth.middleware');
 
@@ -26,5 +27,7 @@ router.route('/:id')
   .get(getVehicleById)
   .put(updateVehicle)
   .delete(deleteVehicle);
+
+router.get('/:id/history', getVehicleHistory);
 
 module.exports = router;

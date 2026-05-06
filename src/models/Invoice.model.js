@@ -8,6 +8,11 @@ const invoiceSchema = new mongoose.Schema({
   job: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Job',
+    required: false // Optional for pre-paid bookings
+  },
+  booking: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Booking',
     required: true
   },
   customer: {
