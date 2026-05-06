@@ -25,8 +25,17 @@ const initializeJob = async (req, res) => {
       }]
     });
 
-    // Update booking status
-    booking.status = 'Confirmed';
+    // LINK JOB TO PRE-PAID INVOICE
+    const Invoice = require('../models/Invoice.model');
+    await Invoice.findOneAndUpdate(
+      { booking: booking._id },
+      { job: job._id }
+    );
+
+    // Update booking status — only upgrade from Pending, never downgrade active statuses
+    if (booking.status === 'Pending') {
+      booking.status = 'Confirmed';
+    }
     await booking.save();
 
     // Notify Technician via SMS if assigned
@@ -37,6 +46,16 @@ const initializeJob = async (req, res) => {
         const { sendSMS } = require('../services/sms.service');
         await sendSMS(tech.phone, `DriveStream: New Job Assigned! Vehicle ${booking.vehicle?.registrationNumber || 'Pending'} is ready for service. View in Tech Portal.`);
       }
+    }
+
+    // ✅ SMS TO CUSTOMER: Booking Confirmed
+    if (booking.customer?.phone) {
+      const { sendSMS, templates } = require('../services/sms.service');
+      const dateStr = new Date(booking.date).toLocaleDateString();
+      await sendSMS(
+        booking.customer.phone, 
+        templates.BOOKING_CONFIRMED(booking.vehicle?.registrationNumber, dateStr, 'the scheduled time')
+      );
     }
 
     res.status(201).json(job);
@@ -50,8 +69,15 @@ const getJobs = async (req, res) => {
   try {
     let query = { customer: req.user._id };
 
-    if (req.user.role === 'admin' || req.user.role === 'technician') {
+    if (req.user.role === 'admin') {
       query = {};
+    } else if (req.user.role === 'technician') {
+      query = { 
+        $or: [
+          { technician: req.user._id }, 
+          { status: 'Waiting' }
+        ] 
+      };
     }
 
     const jobs = await Job.find(query)
@@ -94,18 +120,32 @@ const assignTechnician = async (req, res) => {
 // @desc Start Timer
 const startJob = async (req, res) => {
   try {
-    const job = await Job.findById(req.params.id);
+    const job = await Job.findById(req.params.id).populate('customer').populate('vehicle');
     if (!job) return res.status(404).json({ message: 'Job not found' });
 
     job.status = 'In-Progress';
     job.actualStartTime = new Date();
-    job.timeline.push({ status: 'In-Progress', note: 'Technician started work' });
+    job.timeline.push({ status: 'In-Progress', note: 'Technician started work on vehicle' });
     await job.save();
+
+    // ✅ Sync: Update Booking to In-Progress
+    await Booking.findByIdAndUpdate(job.booking, { status: 'In-Progress' });
+
+    // ✅ SMS TO CUSTOMER: Service Started
+    if (job.customer?.phone) {
+      const { sendSMS, templates } = require('../services/sms.service');
+      await sendSMS(
+        job.customer.phone, 
+        templates.SERVICE_STARTED(job.vehicle?.registrationNumber, 'http://localhost:5173/dashboard')
+      );
+    }
+
     res.json(job);
   } catch (err) {
     res.status(400).json({ message: err.message });
   }
 };
+
 
 // @desc Complete Job
 const completeJob = async (req, res) => {
@@ -123,26 +163,45 @@ const completeJob = async (req, res) => {
     job.technicalRemarks = technicalRemarks;
     job.partsUsed = partsUsed;
     job.nextServiceDate = nextServiceDate;
-    job.timeline.push({ status: 'Completed', note: 'Service finished' });
+    job.timeline.push({ status: 'Completed', note: 'All services finished. Job closed.' });
     await job.save();
+
+    // ✅ Sync: Update Booking to Completed
+    await Booking.findByIdAndUpdate(job.booking._id, { status: 'Completed' });
 
     const partsTotal = (partsUsed || []).reduce((sum, p) => sum + (p.price * p.quantity), 0);
     const baseServiceCost = job.booking.totalPrice;
+    const totalAmount = baseServiceCost + partsTotal;
     
     const Invoice = require('../models/Invoice.model');
-    await Invoice.create({
-      job: job._id,
-      customer: job.customer._id,
-      vehicle: job.vehicle._id,
-      baseServiceCost,
-      partsTotal,
-      grandTotal: baseServiceCost + partsTotal
-    });
+    
+    // Check if pre-paid invoice exists
+    const existingInvoice = await Invoice.findOne({ booking: job.booking._id });
 
-    // SMS Notification to Customer
-    if (job.customer && job.customer.phone) {
-      const { sendSMS } = require('../services/sms.service');
-      await sendSMS(job.customer.phone, `DriveStream: Your vehicle (${job.vehicle?.registrationNumber}) service is complete! An invoice for LKR ${(baseServiceCost + partsTotal).toLocaleString()} has been generated.`);
+    if (existingInvoice) {
+      existingInvoice.job = job._id;
+      existingInvoice.partsTotal = partsTotal;
+      existingInvoice.grandTotal = totalAmount;
+      await existingInvoice.save();
+    } else {
+      await Invoice.create({
+        job: job._id,
+        booking: job.booking._id,
+        customer: job.customer._id,
+        vehicle: job.vehicle._id,
+        baseServiceCost,
+        partsTotal,
+        grandTotal: totalAmount
+      });
+    }
+
+    // ✅ SMS TO CUSTOMER: Job Completed
+    if (job.customer?.phone) {
+      const { sendSMS, templates } = require('../services/sms.service');
+      await sendSMS(
+        job.customer.phone, 
+        templates.SERVICE_COMPLETED(job.vehicle?.registrationNumber, totalAmount.toLocaleString())
+      );
     }
 
     res.json({ message: 'Job completed and Invoice generated', job });
@@ -172,7 +231,7 @@ const updateJobStatus = async (req, res) => {
 const updateTaskStatus = async (req, res) => {
   try {
     const { taskId } = req.params;
-    const { isDone } = req.body;
+    const { status } = req.body; // Expected: 'Pending', 'Started', 'Completed'
     
     const job = await Job.findById(req.params.id);
     if (!job) return res.status(404).json({ message: 'Job not found' });
@@ -180,12 +239,13 @@ const updateTaskStatus = async (req, res) => {
     const task = job.tasks.id(taskId);
     if (!task) return res.status(404).json({ message: 'Task not found' });
 
-    task.isDone = isDone;
+    task.status = status || task.status;
+    task.isDone = status === 'Completed';
     
     // Add to timeline
     job.timeline.push({
       status: job.status,
-      note: `Task ${isDone ? 'Completed' : 'Reopened'}: ${task.name}`
+      note: `Task Update: ${task.name} is now ${status}`
     });
 
     await job.save();

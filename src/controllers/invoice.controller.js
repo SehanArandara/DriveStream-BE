@@ -3,9 +3,18 @@ const Invoice = require('../models/Invoice.model');
 // @desc Get My Invoices (Customer)
 const getMyInvoices = async (req, res) => {
   try {
-    const invoices = await Invoice.find({ customer: req.user._id })
+    let query = { customer: req.user._id };
+    
+    // If Admin, show everything
+    if (req.user.role === 'admin') {
+      query = {};
+    }
+
+    const invoices = await Invoice.find(query)
       .populate('vehicle')
+      .populate('customer', 'name email phone')
       .populate('job')
+      .populate('booking')
       .sort({ createdAt: -1 });
     res.json(invoices);
   } catch (err) {
@@ -36,6 +45,20 @@ const markAsPaid = async (req, res) => {
     invoice.paidAt = new Date();
     invoice.paymentMethod = req.body.paymentMethod || 'Cash';
     await invoice.save();
+
+    // ✅ SMS TO CUSTOMER: Payment Received
+    try {
+      const populatedInvoice = await Invoice.findById(invoice._id).populate('customer');
+      if (populatedInvoice.customer?.phone) {
+        const { sendSMS, templates } = require('../services/sms.service');
+        await sendSMS(
+          populatedInvoice.customer.phone,
+          templates.PAYMENT_RECEIVED(invoice.grandTotal.toLocaleString(), invoice.invoiceNumber)
+        );
+      }
+    } catch (smsErr) {
+      console.log('Payment SMS Error:', smsErr.message);
+    }
 
     res.json(invoice);
   } catch (err) {

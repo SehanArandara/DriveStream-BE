@@ -128,7 +128,7 @@ const getMyBookings = async (req, res) => {
     const bookings = await Booking.find(query)
       .populate('vehicle')
       .populate('customer', 'name email phone')
-      .sort({ date: -1 });
+      .sort({ createdAt: -1 });
     res.json(bookings);
   } catch (err) {
     res.status(500).json({ message: err.message });

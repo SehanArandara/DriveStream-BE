@@ -47,6 +47,11 @@ const jobSchema = new mongoose.Schema({
   // Tasks from Booking
   tasks: [{
     name: String,
+    status: { 
+      type: String, 
+      enum: ['Pending', 'Started', 'Completed'], 
+      default: 'Pending' 
+    },
     isDone: { type: Boolean, default: false }
   }],
   timeline: [{
