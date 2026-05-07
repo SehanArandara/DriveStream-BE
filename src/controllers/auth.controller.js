@@ -337,10 +337,74 @@ const googleLogin = async (req, res) => {
     }
 
     const token = generateToken(user._id);
-    res.json({ message: 'Login successful', token, user });
+    const needsPhone = !user.phone;
+    res.json({ message: 'Login successful', token, user, needsPhone });
   } catch (err) {
     console.error(`\n❌ [Auth] Google Auth Error:`, err.message);
     res.status(400).json({ message: "Google Authentication failed", detail: err.message });
+  }
+};
+
+// POST /api/auth/complete-profile
+const completeProfile = async (req, res) => {
+  let { phone } = req.body;
+  
+  // Format phone for Sri Lanka (+94) if it starts with 0
+  if (phone.startsWith('0')) {
+    phone = '+94' + phone.substring(1);
+  } else if (!phone.startsWith('+')) {
+    phone = '+' + phone;
+  }
+
+  console.log(`\n[Auth] Profile completion for: ${req.user.email} (Formatted: ${phone})`);
+
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found.' });
+
+    // Generate OTP for phone verification
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    user.phone = phone;
+    user.verificationOTP = otp;
+    user.otpExpiresAt = otpExpiresAt;
+    user.isVerified = false; // Require verification for the new phone
+    await user.save();
+
+    console.log(`[Auth] OTP generated for completion: ${otp}`);
+    try {
+      await sendSMS(phone, `Your DriveStream verification code is: ${otp}`);
+    } catch (_) { }
+
+    res.json({ message: 'Phone number updated. Please verify via OTP.', userId: user._id });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// POST /api/auth/resend-otp
+const resendOTP = async (req, res) => {
+  const { userId } = req.body;
+  try {
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: 'User not found.' });
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    user.verificationOTP = otp;
+    user.otpExpiresAt = otpExpiresAt;
+    await user.save();
+
+    console.log(`[Auth] Resending OTP: ${otp} to ${user.phone}`);
+    try {
+      await sendSMS(user.phone, `Your DriveStream verification code is: ${otp}`);
+    } catch (_) { }
+
+    res.json({ message: 'Verification code resent successfully.' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 };
 
@@ -353,5 +417,7 @@ module.exports = {
   verifyOTP, 
   forgotPassword, 
   resetPassword, 
-  setupStaffPassword 
+  setupStaffPassword,
+  completeProfile,
+  resendOTP
 };
