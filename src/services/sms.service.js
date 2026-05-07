@@ -19,37 +19,49 @@ try {
 }
 
 /**
- * Send an SMS message.
- * @param {string} to   - Recipient phone number
+ * Send a WhatsApp message (reusing the sendSMS name for compatibility).
+ * @param {string} to   - Recipient phone number (e.g., 0771234567)
  * @param {string} body - Message text
  */
 const sendSMS = async (to, body) => {
   if (!to) {
-    console.log(`[SMS Mock] No phone number provided. Message: "${body}"`);
+    console.log(`[WhatsApp Mock] No phone number provided. Message: "${body}"`);
     return { mock: true };
   }
 
-  // --- MOCK MODE (Console Logging) ---
+  // Helper to ensure E.164 format and add whatsapp: prefix
+  let formattedTo = to.trim();
+  if (formattedTo.startsWith('0')) {
+    formattedTo = '+94' + formattedTo.substring(1);
+  } else if (!formattedTo.startsWith('+')) {
+    formattedTo = '+' + formattedTo;
+  }
+  
+  const whatsappTo = `whatsapp:${formattedTo}`;
+  const whatsappFrom = `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`; // Use your Sandbox number here
+
+  // --- MOCK MODE ---
   if (!twilioClient) {
     console.log('\n' + '='.repeat(40));
-    console.log('📱 [MOCK SMS SENT]');
-    console.log(`TO: ${to}`);
+    console.log('🟢 [MOCK WHATSAPP SENT]');
+    console.log(`TO: ${whatsappTo}`);
+    console.log(`FROM: ${whatsappFrom}`);
     console.log(`MSG: ${body}`);
     console.log('='.repeat(40) + '\n');
-    return { mock: true, to, body };
+    return { mock: true, to: whatsappTo, body };
   }
 
-  // --- PRODUCTION (Twilio) ---
+  // --- PRODUCTION (Twilio WhatsApp) ---
   try {
     const message = await twilioClient.messages.create({
       body,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to,
+      from: whatsappFrom,
+      to: whatsappTo,
     });
-    console.log(`[SMS Sent] SID: ${message.sid} | TO: ${to}`);
+    console.log(`[WhatsApp Sent] SID: ${message.sid} | TO: ${whatsappTo}`);
     return message;
   } catch (err) {
-    console.error('Twilio Send Error:', err.message);
+    console.error('Twilio WhatsApp Error:', err.message);
     return { error: err.message };
   }
 };
