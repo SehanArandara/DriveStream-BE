@@ -1,4 +1,5 @@
 const Vehicle = require('../models/Vehicle.model');
+const Job = require('../models/Job.model');
 
 // @desc Add a new vehicle
 // @route POST /api/vehicles
@@ -116,13 +117,13 @@ const searchVehicle = async (req, res) => {
     console.log(`[Admin] Searching for vehicle: ${plate}`);
     
     // Use regex for flexible search (case insensitive)
-    const vehicle = await Vehicle.findOne({ 
+    const vehicles = await Vehicle.find({ 
       registrationNumber: { $regex: new RegExp(plate, 'i') } 
     }).populate('owner', 'name email phone');
 
-    if (!vehicle) return res.status(404).json({ message: 'No vehicle found with that registration number.' });
+    if (vehicles.length === 0) return res.status(404).json({ message: 'No vehicles found matching that registration number.' });
 
-    res.json(vehicle);
+    res.json(vehicles);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -140,6 +141,21 @@ const getAllVehiclesAdmin = async (req, res) => {
   }
 };
 
+// @desc Get vehicle service history
+// @route GET /api/vehicles/:id/history
+const getVehicleHistory = async (req, res) => {
+  try {
+    const jobs = await Job.find({ vehicle: req.params.id })
+      .populate('technician', 'name')
+      .populate('booking', 'services totalDuration totalPrice')
+      .sort({ createdAt: -1 });
+      
+    res.json(jobs);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
 module.exports = {
   addVehicle,
   getMyVehicles,
@@ -147,5 +163,6 @@ module.exports = {
   updateVehicle,
   deleteVehicle,
   searchVehicle,
-  getAllVehiclesAdmin
+  getAllVehiclesAdmin,
+  getVehicleHistory
 };

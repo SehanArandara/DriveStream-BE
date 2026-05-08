@@ -21,6 +21,7 @@ app.use('/api/invoices',     require('./routes/invoice.routes'));
 app.use('/api/payments',     require('./routes/payment.routes'));
 app.use('/api/notifications',require('./routes/notification.routes'));
 app.use('/api/chatbot',      require('./routes/chatbot.routes'));
+app.use('/api/stats',        require('./routes/stats.routes'));
 
 // ── Health Check ─────────────────────────────────────────────────────────────
 app.get('/api/health', async (_req, res) => {
