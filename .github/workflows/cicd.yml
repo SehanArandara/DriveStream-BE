@@ -237,12 +237,13 @@ jobs:
   # ─────────────────────────────
   # 7. MICROSOFT TEAMS NOTIFICATION
   # ─────────────────────────────
-  notify-teams:
-    name: 📢 Notify Teams Channel
+  notify:
+    name: 📢 Notify Teams
     runs-on: ubuntu-latest
     needs:
       - install
-      - lint-test
+      - lint
+      - test
       - build
       - docker
       - approval
@@ -251,128 +252,111 @@ jobs:
     if: always()
 
     steps:
-      - name: Send Teams Notification
-        env:
-          TEAMS_WEBHOOK: ${{ secrets.TEAMS_WEBHOOK_URL }}
+      - name: Set Deployment Status
+        id: status
         run: |
-
-          # ─────────────────────────────
-          # PIPELINE STATUS
-          # ─────────────────────────────
-          if [[ "${{ needs.deploy.result }}" == "success" ]]; then
-            STATUS="SUCCESS"
-            COLOR="00FF00"
-            ICON="✅"
+          if [ "${{ needs.deploy.result }}" == "success" ]; then
+            echo "emoji=✅" >> $GITHUB_OUTPUT
+            echo "title=Backend - DriveStream Deployment Successful" >> $GITHUB_OUTPUT
+            echo "status=SUCCESS" >> $GITHUB_OUTPUT
+            echo "message=DriveStream backend deployed successfully to production." >> $GITHUB_OUTPUT
           else
-            STATUS="FAILED"
-            COLOR="FF0000"
-            ICON="❌"
+            echo "emoji=❌" >> $GITHUB_OUTPUT
+            echo "title=Backend - DriveStream Deployment Failed" >> $GITHUB_OUTPUT
+            echo "status=FAILED" >> $GITHUB_OUTPUT
+            echo "message=Backend deployment failed. Check logs immediately." >> $GITHUB_OUTPUT
           fi
 
-          # ─────────────────────────────
-          # BUILD DETAILS
-          # ─────────────────────────────
-          REPO="${{ github.repository }}"
-          BRANCH="${{ github.ref_name }}"
-          ACTOR="${{ github.actor }}"
-          COMMIT_MESSAGE="${{ github.event.head_commit.message }}"
-          COMMIT_SHA="${{ github.sha }}"
-          SHORT_SHA=$(echo $COMMIT_SHA | cut -c1-7)
+      - name: Generate Metadata
+        id: meta
+        run: |
+          echo "short_sha=$(echo '${{ github.sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
+          echo "sl_time=$(TZ='Asia/Colombo' date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
+          echo "workflow_url=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_OUTPUT
+          echo "commit_url=https://github.com/${{ github.repository }}/commit/${{ github.sha }}" >> $GITHUB_OUTPUT
 
-          WORKFLOW="${{ github.workflow }}"
-          RUN_NUMBER="${{ github.run_number }}"
-          RUN_ID="${{ github.run_id }}"
-
-          IMAGE="${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest"
-
-          WORKFLOW_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
-          COMMIT_URL="https://github.com/${REPO}/commit/${COMMIT_SHA}"
-
-          DATE=$(date)
-
-          # ─────────────────────────────
-          # TEAMS MESSAGE PAYLOAD
-          # ─────────────────────────────
-          curl -H "Content-Type: application/json" \
+      - name: Send Teams Adaptive Card
+        run: |
+          curl -X POST "${{ secrets.TEAMS_WEBHOOK_URL }}" \
+          -H "Content-Type: application/json" \
           -d "{
-            \"@type\": \"MessageCard\",
-            \"@context\": \"https://schema.org/extensions\",
-            \"themeColor\": \"$COLOR\",
-            \"summary\": \"DriveStream CI/CD Pipeline\",
-
-            \"sections\": [
+            \"type\": \"message\",
+            \"attachments\": [
               {
-                \"activityTitle\": \"$ICON DriveStream Deployment $STATUS\",
-                \"activitySubtitle\": \"GitHub Actions CI/CD Notification\",
+                \"contentType\": \"application/vnd.microsoft.card.adaptive\",
+                \"content\": {
+                  \"$schema\": \"http://adaptivecards.io/schemas/adaptive-card.json\",
+                  \"type\": \"AdaptiveCard\",
+                  \"version\": \"1.4\",
+                  \"body\": [
 
-                \"facts\": [
-                  {
-                    \"name\": \"📦 Repository\",
-                    \"value\": \"$REPO\"
-                  },
-                  {
-                    \"name\": \"🌿 Branch\",
-                    \"value\": \"$BRANCH\"
-                  },
-                  {
-                    \"name\": \"👤 Triggered By\",
-                    \"value\": \"$ACTOR\"
-                  },
-                  {
-                    \"name\": \"🔄 Workflow\",
-                    \"value\": \"$WORKFLOW\"
-                  },
-                  {
-                    \"name\": \"🆔 Run Number\",
-                    \"value\": \"#$RUN_NUMBER\"
-                  },
-                  {
-                    \"name\": \"🐳 Docker Image\",
-                    \"value\": \"$IMAGE\"
-                  },
-                  {
-                    \"name\": \"🚀 Environment\",
-                    \"value\": \"Production\"
-                  },
-                  {
-                    \"name\": \"📝 Commit\",
-                    \"value\": \"$COMMIT_MESSAGE\"
-                  },
-                  {
-                    \"name\": \"🔖 Commit SHA\",
-                    \"value\": \"$SHORT_SHA\"
-                  },
-                  {
-                    \"name\": \"⏰ Time\",
-                    \"value\": \"$DATE\"
-                  }
-                ],
+                    {
+                      \"type\": \"TextBlock\",
+                      \"text\": \"${{ steps.status.outputs.emoji }} ${{ steps.status.outputs.title }}\",
+                      \"weight\": \"Bolder\",
+                      \"size\": \"Large\",
+                      \"wrap\": true
+                    },
 
-                \"markdown\": true
-              }
-            ],
+                    {
+                      \"type\": \"TextBlock\",
+                      \"text\": \"${{ steps.status.outputs.message }}\",
+                      \"wrap\": true,
+                      \"isSubtle\": true
+                    },
 
-            \"potentialAction\": [
-              {
-                \"@type\": \"OpenUri\",
-                \"name\": \"🔍 View Workflow\",
-                \"targets\": [
-                  {
-                    \"os\": \"default\",
-                    \"uri\": \"$WORKFLOW_URL\"
-                  }
-                ]
-              },
-              {
-                \"@type\": \"OpenUri\",
-                \"name\": \"📝 View Commit\",
-                \"targets\": [
-                  {
-                    \"os\": \"default\",
-                    \"uri\": \"$COMMIT_URL\"
-                  }
-                ]
+                    {
+                      \"type\": \"FactSet\",
+                      \"facts\": [
+                        {
+                          \"title\": \"📦 Repository\",
+                          \"value\": \"${{ github.repository }}\"
+                        },
+                        {
+                          \"title\": \"🌿 Branch\",
+                          \"value\": \"${{ github.ref_name }}\"
+                        },
+                        {
+                          \"title\": \"👤 Triggered By\",
+                          \"value\": \"${{ github.actor }}\"
+                        },
+                        {
+                          \"title\": \"🔄 Workflow\",
+                          \"value\": \"${{ github.workflow }}\"
+                        },
+                        {
+                          \"title\": \"🆔 Run\",
+                          \"value\": \"#${{ github.run_number }}\"
+                        },
+                        {
+                          \"title\": \"🔖 Commit\",
+                          \"value\": \"${{ steps.meta.outputs.short_sha }}\"
+                        },
+                        {
+                          \"title\": \"🚀 Status\",
+                          \"value\": \"${{ steps.status.outputs.status }}\"
+                        },
+                        {
+                          \"title\": \"🕐 Time\",
+                          \"value\": \"${{ steps.meta.outputs.sl_time }}\"
+                        }
+                      ]
+                    }
+
+                  ],
+                  \"actions\": [
+                    {
+                      \"type\": \"Action.OpenUrl\",
+                      \"title\": \"🔍 Workflow\",
+                      \"url\": \"${{ steps.meta.outputs.workflow_url }}\"
+                    },
+                    {
+                      \"type\": \"Action.OpenUrl\",
+                      \"title\": \"📂 Commit\",
+                      \"url\": \"${{ steps.meta.outputs.commit_url }}\"
+                    }
+                  ]
+                }
               }
             ]
-          }" \
-          $TEAMS_WEBHOOK
+          }"
