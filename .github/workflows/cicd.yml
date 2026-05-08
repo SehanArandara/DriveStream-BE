@@ -68,89 +68,20 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
 
   # ─────────────────────────────
-  # NOTIFY TEAMS
+  # NOTIFY
   # ─────────────────────────────
   notify:
-    name: 📢 Notify Teams
-    runs-on: ubuntu-latest
+    uses: NADUNSANDEEPA/DriveStream-CommonCICD/.github/workflows/common-notify.yml@main
     needs: deploy
 
-    if: always()
+    with:
+      status: ${{ needs.deploy.result }}
+      actor: ${{ github.actor }}
+      branch: ${{ github.ref_name }}
+      workflow_name: ${{ github.workflow }}
+      run_number: ${{ github.run_number }}
+      repository: ${{ github.repository }}
+      commit_sha: ${{ github.sha }}
 
-    steps:
-      - name: Prepare Metadata
-        id: meta
-        run: |
-          echo "short_sha=$(echo '${{ github.sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
-          echo "time=$(TZ='Asia/Colombo' date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
-          echo "workflow_url=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_OUTPUT
-          echo "commit_url=https://github.com/${{ github.repository }}/commit/${{ github.sha }}" >> $GITHUB_OUTPUT
-
-      - name: Set Status
-        id: status
-        run: |
-          if [[ "${{ needs.deploy.result }}" == "success" ]]; then
-            echo "STATUS=SUCCESS" >> $GITHUB_OUTPUT
-            echo "ICON=✅" >> $GITHUB_OUTPUT
-            echo "COLOR=00FF00" >> $GITHUB_OUTPUT
-          else
-            echo "STATUS=FAILED" >> $GITHUB_OUTPUT
-            echo "ICON=❌" >> $GITHUB_OUTPUT
-            echo "COLOR=FF0000" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Send Teams Notification
-        env:
-          TEAMS_WEBHOOK: ${{ secrets.TEAMS_WEBHOOK_URL }}
-        run: |
-          curl -H "Content-Type: application/json" \
-          -d "{
-            \"@type\": \"MessageCard\",
-            \"@context\": \"https://schema.org/extensions\",
-            \"themeColor\": \"${{ steps.status.outputs.COLOR }}\",
-            \"summary\": \"DriveStream CI/CD Pipeline\",
-
-            \"sections\": [
-              {
-                \"activityTitle\": \"${{ steps.status.outputs.ICON }} Deployment ${{ steps.status.outputs.STATUS }}\",
-                \"activitySubtitle\": \"DriveStream CI/CD Notification\",
-
-                \"facts\": [
-                  { \"name\": \"📦 Repository\", \"value\": \"${{ github.repository }}\" },
-                  { \"name\": \"🌿 Branch\", \"value\": \"${{ github.ref_name }}\" },
-                  { \"name\": \"👤 Triggered By\", \"value\": \"${{ github.actor }}\" },
-                  { \"name\": \"🔄 Workflow\", \"value\": \"${{ github.workflow }}\" },
-                  { \"name\": \"🆔 Run Number\", \"value\": \"#${{ github.run_number }}\" },
-                  { \"name\": \"🔖 Commit SHA\", \"value\": \"${{ steps.meta.outputs.short_sha }}\" },
-                  { \"name\": \"⏰ Time (SL)\", \"value\": \"${{ steps.meta.outputs.time }}\" },
-                  { \"name\": \"🚀 Status\", \"value\": \"${{ steps.status.outputs.STATUS }}\" }
-                ],
-
-                \"markdown\": true
-              }
-            ],
-
-            \"potentialAction\": [
-              {
-                \"@type\": \"OpenUri\",
-                \"name\": \"🔍 View Workflow\",
-                \"targets\": [
-                  {
-                    \"os\": \"default\",
-                    \"uri\": \"${{ steps.meta.outputs.workflow_url }}\"
-                  }
-                ]
-              },
-              {
-                \"@type\": \"OpenUri\",
-                \"name\": \"📝 View Commit\",
-                \"targets\": [
-                  {
-                    \"os\": \"default\",
-                    \"uri\": \"${{ steps.meta.outputs.commit_url }}\"
-                  }
-                ]
-              }
-            ]
-          }" \
-          $TEAMS_WEBHOOK
+    secrets:
+      TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
