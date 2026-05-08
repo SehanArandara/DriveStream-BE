@@ -8,3 +8,5 @@ yarn-error.log*
 dist/
 build/
 .DS_Store
+.vercel
+.env*.local

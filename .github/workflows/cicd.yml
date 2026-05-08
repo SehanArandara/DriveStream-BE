@@ -7,7 +7,7 @@ on:
     branches: [main, develop, cicd-pipeline]
 
 env:
-  IMAGE_NAME: drivestream-server
+  IMAGE_NAME: drivestreamserver
 
 jobs:
 
@@ -37,7 +37,7 @@ jobs:
     name: 🔍 Lint and Test
     runs-on: ubuntu-latest
     needs: install
-    continue-on-error: true   
+    continue-on-error: true
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -61,7 +61,7 @@ jobs:
   # 3. BUILD APPLICATION
   # ─────────────────────────────
   build:
-    name : 🏗️ Build App
+    name: 🏗️ Build App
     runs-on: ubuntu-latest
     needs: lint-test
     steps:
@@ -157,14 +157,222 @@ jobs:
       - name: Install Vercel CLI
         run: npm install -g vercel
 
-      # Pull project settings (now stable because of vercel.json)
+      # ─────────────────────────────────────────────────────
+      # SYNC GITHUB SECRETS → VERCEL via REST API
+      # Checks if each var exists → updates or creates it
+      # Runs on every deploy so Vercel stays in sync always
+      # ─────────────────────────────────────────────────────
+      - name: Sync Environment Variables to Vercel
+        run: |
+          BASE_URL="https://api.vercel.com/v10/projects/${{ secrets.VERCEL_PROJECT_ID }}/env"
+          TOKEN="${{ secrets.VERCEL_TOKEN }}"
+
+          sync_env() {
+            KEY="$1"
+            VALUE="$2"
+
+            # Fetch all env vars and check if this key already exists in production
+            EXISTING_ID=$(curl -s -X GET "$BASE_URL" \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Content-Type: application/json" | \
+              python3 -c "
+          import sys, json
+          try:
+            data = json.load(sys.stdin)
+            envs = data.get('envs', [])
+            match = next((e for e in envs if e['key'] == '$KEY' and 'production' in e.get('target', [])), None)
+            print(match['id'] if match else '')
+          except:
+            print('')
+          ")
+
+            # Safely JSON-encode the value to handle special characters
+            JSON_VALUE=$(echo "$VALUE" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read().strip()))")
+
+            if [ -n "$EXISTING_ID" ]; then
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "$BASE_URL/$EXISTING_ID" \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{\"value\": $JSON_VALUE, \"target\": [\"production\"], \"type\": \"encrypted\"}")
+              echo "✅ Updated  $KEY (HTTP $HTTP_STATUS)"
+            else
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL" \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{\"key\": \"$KEY\", \"value\": $JSON_VALUE, \"target\": [\"production\"], \"type\": \"encrypted\"}")
+              echo "✅ Created  $KEY (HTTP $HTTP_STATUS)"
+            fi
+          }
+
+          sync_env "PORT"                  "${{ secrets.PORT }}"
+          sync_env "MONGODB_URI"           "${{ secrets.MONGODB_URI }}"
+          sync_env "JWT_SECRET"            "${{ secrets.JWT_SECRET }}"
+          sync_env "JWT_EXPIRES_IN"        "${{ secrets.JWT_EXPIRES_IN }}"
+          sync_env "STRIPE_SECRET_KEY"     "${{ secrets.STRIPE_SECRET_KEY }}"
+          sync_env "STRIPE_WEBHOOK_SECRET" "${{ secrets.STRIPE_WEBHOOK_SECRET }}"
+          sync_env "TWILIO_ACCOUNT_SID"    "${{ secrets.TWILIO_ACCOUNT_SID }}"
+          sync_env "TWILIO_AUTH_TOKEN"     "${{ secrets.TWILIO_AUTH_TOKEN }}"
+          sync_env "TWILIO_PHONE_NUMBER"   "${{ secrets.TWILIO_PHONE_NUMBER }}"
+          sync_env "OPENAI_API_KEY"        "${{ secrets.OPENAI_API_KEY }}"
+          sync_env "CLIENT_URL"            "${{ secrets.CLIENT_URL }}"
+
       - name: Pull Vercel Environment Info
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
 
-      # Build project using Vercel
       - name: Build Project
         run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
 
-      # Deploy prebuilt output
       - name: Deploy to Vercel
         run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+
+  # ─────────────────────────────
+  # 7. MICROSOFT TEAMS NOTIFICATION
+  # ─────────────────────────────
+  notify-teams:
+    name: 📢 Notify Teams Channel
+    runs-on: ubuntu-latest
+    needs:
+      - install
+      - lint-test
+      - build
+      - docker
+      - approval
+      - deploy
+
+    if: always()
+
+    steps:
+      - name: Send Teams Notification
+        env:
+          TEAMS_WEBHOOK: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+
+          # ─────────────────────────────
+          # PIPELINE STATUS
+          # ─────────────────────────────
+          if [[ "${{ needs.deploy.result }}" == "success" ]]; then
+            STATUS="SUCCESS"
+            COLOR="00FF00"
+            ICON="✅"
+          else
+            STATUS="FAILED"
+            COLOR="FF0000"
+            ICON="❌"
+          fi
+
+          # ─────────────────────────────
+          # BUILD DETAILS
+          # ─────────────────────────────
+          REPO="${{ github.repository }}"
+          BRANCH="${{ github.ref_name }}"
+          ACTOR="${{ github.actor }}"
+          COMMIT_MESSAGE="${{ github.event.head_commit.message }}"
+          COMMIT_SHA="${{ github.sha }}"
+          SHORT_SHA=$(echo $COMMIT_SHA | cut -c1-7)
+
+          WORKFLOW="${{ github.workflow }}"
+          RUN_NUMBER="${{ github.run_number }}"
+          RUN_ID="${{ github.run_id }}"
+
+          IMAGE="${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest"
+
+          WORKFLOW_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
+          COMMIT_URL="https://github.com/${REPO}/commit/${COMMIT_SHA}"
+
+          DATE=$(date)
+
+          # ─────────────────────────────
+          # TEAMS MESSAGE PAYLOAD
+          # ─────────────────────────────
+          curl -H "Content-Type: application/json" \
+          -d "{
+            \"@type\": \"MessageCard\",
+            \"@context\": \"https://schema.org/extensions\",
+            \"themeColor\": \"$COLOR\",
+            \"summary\": \"DriveStream CI/CD Pipeline\",
+
+            \"sections\": [
+              {
+                \"activityTitle\": \"$ICON DriveStream Deployment $STATUS\",
+                \"activitySubtitle\": \"GitHub Actions CI/CD Notification\",
+
+                \"facts\": [
+                  {
+                    \"name\": \"📦 Repository\",
+                    \"value\": \"$REPO\"
+                  },
+                  {
+                    \"name\": \"🌿 Branch\",
+                    \"value\": \"$BRANCH\"
+                  },
+                  {
+                    \"name\": \"👤 Triggered By\",
+                    \"value\": \"$ACTOR\"
+                  },
+                  {
+                    \"name\": \"🔄 Workflow\",
+                    \"value\": \"$WORKFLOW\"
+                  },
+                  {
+                    \"name\": \"🆔 Run Number\",
+                    \"value\": \"#$RUN_NUMBER\"
+                  },
+                  {
+                    \"name\": \"🐳 Docker Image\",
+                    \"value\": \"$IMAGE\"
+                  },
+                  {
+                    \"name\": \"🚀 Environment\",
+                    \"value\": \"Production\"
+                  },
+                  {
+                    \"name\": \"📝 Commit\",
+                    \"value\": \"$COMMIT_MESSAGE\"
+                  },
+                  {
+                    \"name\": \"🔖 Commit SHA\",
+                    \"value\": \"$SHORT_SHA\"
+                  },
+                  {
+                    \"name\": \"⏰ Time\",
+                    \"value\": \"$DATE\"
+                  }
+                ],
+
+                \"markdown\": true
+              }
+            ],
+
+            \"potentialAction\": [
+              {
+                \"@type\": \"OpenUri\",
+                \"name\": \"🔍 View Workflow\",
+                \"targets\": [
+                  {
+                    \"os\": \"default\",
+                    \"uri\": \"$WORKFLOW_URL\"
+                  }
+                ]
+              },
+              {
+                \"@type\": \"OpenUri\",
+                \"name\": \"📝 View Commit\",
+                \"targets\": [
+                  {
+                    \"os\": \"default\",
+                    \"uri\": \"$COMMIT_URL\"
+                  }
+                ]
+              }
+            ]
+          }" \
+          $TEAMS_WEBHOOK

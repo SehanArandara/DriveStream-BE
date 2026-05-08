@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const app = express();
+const connectDB = require('./config/db');
 
 // ── Middleware ──────────────────────────────────────────────────────────────
 app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173', credentials: true }));
@@ -23,8 +24,24 @@ app.use('/api/chatbot',      require('./routes/chatbot.routes'));
 app.use('/api/stats',        require('./routes/stats.routes'));
 
 // ── Health Check ─────────────────────────────────────────────────────────────
-app.get('/api/health', (_req, res) => {
-  res.json({ status: 'OK', service: 'DriveStream API', timestamp: new Date() });
+app.get('/api/health', async (_req, res) => {
+  try {
+    await connectDB();
+
+    res.json({
+      status: 'OK',
+      service: 'DriveStream API',
+      db: 'connected',
+      timestamp: new Date()
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      status: 'ERROR',
+      db: 'disconnected',
+      message: err.message
+    });
+  }
 });
 
 // ── 404 Handler ──────────────────────────────────────────────────────────────
