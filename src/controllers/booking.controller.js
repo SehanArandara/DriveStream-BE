@@ -4,7 +4,7 @@ const Vehicle = require('../models/Vehicle.model');
 
 // SSE Configuration: Workshop Capacity
 // Default: 3 Techs * 8 Hours * 60 Mins = 1440 mins
-const DAILY_MAX_MINUTES = 1440; 
+const DAILY_MAX_MINUTES = 1440;
 
 // @desc Start of day helper
 const getStartOfDay = (dateStr) => {
@@ -32,7 +32,7 @@ const checkAvailability = async (req, res) => {
 
     const bookedMinutes = existingBookings.reduce((sum, b) => sum + b.totalDuration, 0);
     const requestedMinutes = parseInt(duration);
-    
+
     const remaining = DAILY_MAX_MINUTES - bookedMinutes;
     const isAvailable = remaining >= requestedMinutes;
 
@@ -61,7 +61,7 @@ const createBooking = async (req, res) => {
 
     // 2. Fetch Services and Calculate Contextual Totals
     const servicesData = await Service.find({ _id: { $in: serviceIds } });
-    
+
     let totalDuration = 0;
     let totalPrice = 0;
     const formattedServices = [];
@@ -92,8 +92,8 @@ const createBooking = async (req, res) => {
 
     const bookedMinutes = existingBookings.reduce((sum, b) => sum + b.totalDuration, 0);
     if ((bookedMinutes + totalDuration) > DAILY_MAX_MINUTES) {
-      return res.status(400).json({ 
-        message: `Capacity exceeded for ${date}. Only ${DAILY_MAX_MINUTES - bookedMinutes} mins left.` 
+      return res.status(400).json({
+        message: `Capacity exceeded for ${date}. Only ${DAILY_MAX_MINUTES - bookedMinutes} mins left.`
       });
     }
 
@@ -119,7 +119,7 @@ const createBooking = async (req, res) => {
 const getMyBookings = async (req, res) => {
   try {
     let query = { customer: req.user._id };
-    
+
     // If Admin or Technician, show everything
     if (req.user.role === 'admin' || req.user.role === 'technician') {
       query = {};
