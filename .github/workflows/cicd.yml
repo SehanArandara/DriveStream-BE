@@ -22,8 +22,8 @@ jobs:
     with:
       node_version: "20"
       image_name: drivestreamserver
-      test_command: node -e "console.log('Tests Passed')"
-      build_command: npm test
+      test_command: npm test
+      build_command: node -e "console.log('Build Passed')"
 
     secrets:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
